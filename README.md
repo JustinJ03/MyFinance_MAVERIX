@@ -1,0 +1,2 @@
+# MAVERIX_Hackathon-X
+MAVERIX Group Repository for HACKATHON X: FINTECH FORWARD 2026
