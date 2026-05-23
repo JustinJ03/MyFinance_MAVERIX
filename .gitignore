@@ -1,0 +1,119 @@
+# ╔══════════════════════════════════════════════════════════════════════════════╗
+# ║                        MyFinance — MAVERIX Group                           ║
+# ║                    Root .gitignore  (covers entire repo)                   ║
+# ╚══════════════════════════════════════════════════════════════════════════════╝
+
+
+# ── Environment & Secrets ─────────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+.env.production
+.env.staging
+.env.backup
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+auth.json                        # Composer auth tokens
+
+
+# ── User-Uploaded Files (receipts, bank statements) ──────────────────────────
+# Never commit real user data. Laravel local disk stores here.
+backend/storage/app/private/
+backend/storage/app/public/uploads/
+
+
+# ── Laravel Runtime & Cache ───────────────────────────────────────────────────
+backend/storage/logs/
+backend/storage/framework/cache/
+backend/storage/framework/sessions/
+backend/storage/framework/testing/
+backend/storage/framework/views/
+backend/bootstrap/cache/
+backend/public/hot
+backend/public/storage
+backend/public/build
+
+
+# ── PHP Dependencies ──────────────────────────────────────────────────────────
+backend/vendor/
+
+
+# ── Node / Next.js ────────────────────────────────────────────────────────────
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/build/
+frontend/.pnp
+frontend/.pnp.*
+frontend/*.tsbuildinfo
+frontend/next-env.d.ts
+
+
+# ── Claude Code ───────────────────────────────────────────────────────────────
+# Keep: CLAUDE.md / AGENTS.md if you want AI rules committed (useful for teams)
+# Remove the lines below only if you deliberately want to share AI config.
+.claude/
+CLAUDE.md
+AGENTS.md
+# Claude Code stores conversation transcripts and memory here — never commit
+*.jsonl
+
+
+# ── Other AI / Dev Tool Artifacts ────────────────────────────────────────────
+.superpowers/
+docs/superpowers/
+DEVELOPMENT_MEMORY.md
+.cursor/
+.windsurf/
+.aider*
+.copilot/
+
+
+# ── OS Junk ───────────────────────────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+
+# ── Editor / IDE ─────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+.zed/
+.nova/
+.fleet/
+*.swp
+*.swo
+*.suo
+*.user
+*.workspace
+
+
+# ── Logs & Debug ─────────────────────────────────────────────────────────────
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+
+# ── Test & Coverage Artifacts ─────────────────────────────────────────────────
+coverage/
+.phpunit.cache/
+.phpunit.result.cache
+/backend/.phpunit.result.cache
+
+
+# ── Misc ──────────────────────────────────────────────────────────────────────
+*.zip
+*.tar.gz
+*.bak
+*.tmp

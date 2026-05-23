@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\AsbController;
+use App\Http\Controllers\Api\BankStatementController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BankAccountController;
 use App\Http\Controllers\Api\BudgetController;
@@ -38,6 +39,10 @@ Route::prefix('v1')->group(function () {
             Route::patch('{account}/archive',          [BankAccountController::class, 'archive']);
             Route::patch('{account}/restore',          [BankAccountController::class, 'restore']);
             Route::get('{account}/transactions',       [BankAccountController::class, 'transactions']);
+            Route::get('{account}/statements',                          [BankStatementController::class, 'index']);
+            Route::post('{account}/statements',                         [BankStatementController::class, 'store']);
+            Route::get('{account}/statements/{statement}/download',     [BankStatementController::class, 'download']);
+            Route::delete('{account}/statements/{statement}',           [BankStatementController::class, 'destroy']);
         });
 
         // Categories
@@ -61,6 +66,8 @@ Route::prefix('v1')->group(function () {
             Route::delete('{transaction}',         [TransactionController::class, 'destroy']);
             Route::patch('{transaction}/confirm',  [TransactionController::class, 'confirm']);
             Route::patch('{transaction}/skip',     [TransactionController::class, 'skip']);
+            Route::get('{transaction}/receipt',     [TransactionController::class, 'receipt']);
+            Route::post('{transaction}/receipt',    [TransactionController::class, 'updateReceipt']);
         });
 
         // Recurring Templates

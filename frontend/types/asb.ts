@@ -55,4 +55,5 @@ export interface StoreAsbDividendPayload {
   dividend_amount: number;
   bonus_rate?: number;
   bonus_amount?: number;
+  total_payout?: number;
 }

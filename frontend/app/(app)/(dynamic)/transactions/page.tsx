@@ -12,15 +12,39 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { Separator } from '@/components/ui/separator';
 import { toast } from 'sonner';
 import { useForm, Controller } from 'react-hook-form';
-import { Plus, CheckCircle, XCircle, ArrowLeftRight, TrendingDown, TrendingUp, Pencil, Trash2 } from 'lucide-react';
+import { Plus, CheckCircle, XCircle, ArrowLeftRight, TrendingDown, TrendingUp, Pencil, Trash2, Paperclip, Eye, ExternalLink } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
 import ConfirmDialog from '@/components/common/ConfirmDialog';
+
+async function openAuthFile(url: string) {
+  try {
+    const res = await api.get(url, { responseType: 'blob' });
+    const blobUrl = URL.createObjectURL(res.data);
+    window.open(blobUrl, '_blank');
+  } catch {
+    // handled by caller
+    throw new Error('Failed to open file');
+  }
+}
+
+function groupByMonth(txs: any[]) {
+  const map = new Map<string, any[]>();
+  for (const tx of txs) {
+    const d = tx.actual_date ? new Date(tx.actual_date) : new Date();
+    const label = d.toLocaleString('default', { month: 'long', year: 'numeric' });
+    if (!map.has(label)) map.set(label, []);
+    map.get(label)!.push(tx);
+  }
+  return Array.from(map.entries()).map(([month, items]) => ({ month, items }));
+}
 
 export default function TransactionsPage() {
   const qc = useQueryClient();
@@ -30,6 +54,7 @@ export default function TransactionsPage() {
   const [open, setOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [viewOpen, setViewOpen] = useState(false);
   const [selectedTx, setSelectedTx] = useState<any>(null);
   const { register, handleSubmit, control, reset, watch } = useForm();
   const { register: editReg, handleSubmit: editSubmit, control: editCtrl, reset: editReset } = useForm();
@@ -37,8 +62,10 @@ export default function TransactionsPage() {
   const { data: transactions = [], isLoading } = useQuery({
     queryKey: ['transactions', filter],
     queryFn: () => {
-      const params = filter !== 'all' ? `?status=${filter}` : '';
-      return api.get(`/transactions${params}`).then((r) => r.data.data ?? []);
+      const params: Record<string, string> = {};
+      if (filter === 'pending') params.status = 'pending';
+      else if (filter === 'expense' || filter === 'income') params.type = filter;
+      return api.get('/transactions', { params }).then((r) => r.data.data ?? []);
     },
   });
 
@@ -76,8 +103,21 @@ export default function TransactionsPage() {
   const isEpfCategory = selectedCategory?.name?.toLowerCase().includes('epf');
   const isAsbCategory = selectedCategory?.name?.toLowerCase().includes('asb');
 
+  const grouped = useMemo(() => groupByMonth(transactions), [transactions]);
+
   const createMutation = useMutation({
-    mutationFn: (d: any) => api.post('/transactions', d),
+    mutationFn: (d: any) => {
+      if (d.receipt instanceof File) {
+        const fd = new FormData();
+        Object.entries(d).forEach(([k, v]) => {
+          if (v !== undefined && v !== null && v !== '') {
+            fd.append(k, v instanceof File ? v : String(v));
+          }
+        });
+        return api.post('/transactions', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      }
+      return api.post('/transactions', d);
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['transactions'] });
       qc.invalidateQueries({ queryKey: ['dashboard'] });
@@ -90,7 +130,15 @@ export default function TransactionsPage() {
   });
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, ...d }: any) => api.put(`/transactions/${id}`, d),
+    mutationFn: async ({ id, receipt, ...d }: any) => {
+      const res = await api.put(`/transactions/${id}`, d);
+      if (receipt instanceof File) {
+        const fd = new FormData();
+        fd.append('receipt', receipt);
+        await api.post(`/transactions/${id}/receipt`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      }
+      return res;
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['transactions'] });
       qc.invalidateQueries({ queryKey: ['dashboard'] });
@@ -145,7 +193,24 @@ export default function TransactionsPage() {
     setEditOpen(true);
   };
 
+  const openView = (tx: any) => {
+    setSelectedTx(tx);
+    setViewOpen(true);
+  };
+
   const balance = (v: number) => balanceVisible ? formatRM(v) : 'RM •••••';
+
+  const typeIcon = (tx: any) => {
+    if (tx.type === 'income') return <TrendingUp size={16} className="text-green-400" />;
+    if (tx.type === 'transfer') return <ArrowLeftRight size={16} className="text-blue-400" />;
+    return <TrendingDown size={16} className="text-red-400" />;
+  };
+
+  const typeBg = (tx: any) => {
+    if (tx.type === 'income') return 'bg-green-500/10';
+    if (tx.type === 'transfer') return 'bg-blue-500/10';
+    return 'bg-red-500/10';
+  };
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -165,7 +230,15 @@ export default function TransactionsPage() {
             <SheetHeader>
               <SheetTitle className="text-white">Add Transaction</SheetTitle>
             </SheetHeader>
-            <form onSubmit={handleSubmit((d) => createMutation.mutate({ ...d, amount: parseFloat(d.amount) }))} className="space-y-4 mt-6">
+            <form onSubmit={handleSubmit((d) => {
+              const payload: any = { ...d, amount: parseFloat(d.amount) };
+              if (d.receipt instanceof FileList && d.receipt.length > 0) {
+                payload.receipt = d.receipt[0];
+              } else {
+                delete payload.receipt;
+              }
+              createMutation.mutate(payload);
+            })} className="space-y-4 mt-6">
               <div className="space-y-1.5">
                 <Label className="text-slate-300">Type</Label>
                 <Controller name="type" control={control} rules={{ required: true }} render={({ field }) => (
@@ -210,7 +283,6 @@ export default function TransactionsPage() {
                   className="bg-slate-800 border-slate-700 text-white" />
               </div>
 
-              {/* Category — only for expense/income */}
               {txType !== 'transfer' && (
                 <div className="space-y-1.5">
                   <Label className="text-slate-300">Category</Label>
@@ -234,7 +306,6 @@ export default function TransactionsPage() {
                 </div>
               )}
 
-              {/* To Account — transfers only */}
               {txType === 'transfer' && (
                 <div className="space-y-1.5">
                   <Label className="text-slate-300">To Account</Label>
@@ -251,7 +322,6 @@ export default function TransactionsPage() {
                 </div>
               )}
 
-              {/* EPF account — when category matches EPF */}
               {isEpfCategory && (
                 <div className="space-y-1.5">
                   <Label className="text-slate-300">EPF Account</Label>
@@ -270,7 +340,6 @@ export default function TransactionsPage() {
                 </div>
               )}
 
-              {/* ASB fund — when category matches ASB */}
               {isAsbCategory && asbFunds.length > 0 && (
                 <div className="space-y-1.5">
                   <Label className="text-slate-300">ASB Fund</Label>
@@ -292,6 +361,15 @@ export default function TransactionsPage() {
                 <Textarea {...register('remarks')} placeholder="Any notes..."
                   className="bg-slate-800 border-slate-700 text-white" rows={2} />
               </div>
+              <div className="space-y-1.5">
+                <Label className="text-slate-300 flex items-center gap-1.5"><Paperclip size={13} /> Receipt (optional, max 15 MB)</Label>
+                <input
+                  {...register('receipt')}
+                  type="file"
+                  accept=".pdf,.jpg,.jpeg,.png,.webp"
+                  className="w-full text-sm text-slate-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-indigo-600 file:text-white hover:file:bg-indigo-500 cursor-pointer bg-slate-800 border border-slate-700 rounded-lg px-3 py-2"
+                />
+              </div>
               <Button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-500" disabled={createMutation.isPending}>
                 {createMutation.isPending ? 'Adding…' : 'Add Transaction'}
               </Button>
@@ -311,58 +389,148 @@ export default function TransactionsPage() {
         </TabsList>
       </Tabs>
 
-      {/* Transaction List */}
-      <Card className="bg-slate-900 border-slate-800">
-        <CardContent className="pt-4 divide-y divide-slate-800">
-          {isLoading ? (
-            <div className="flex justify-center py-10">
-              <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-            </div>
-          ) : transactions.length === 0 ? (
-            <div className="text-center py-12 text-slate-500">No transactions found</div>
-          ) : transactions.map((tx: any) => (
-            <div key={tx.id} className="flex items-center gap-3 py-3">
-              <div className={`p-2 rounded-lg ${tx.type === 'income' ? 'bg-green-500/10' : tx.type === 'transfer' ? 'bg-blue-500/10' : 'bg-red-500/10'}`}>
-                {tx.type === 'income' ? <TrendingUp size={16} className="text-green-400" /> :
-                 tx.type === 'transfer' ? <ArrowLeftRight size={16} className="text-blue-400" /> :
-                 <TrendingDown size={16} className="text-red-400" />}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-slate-100 truncate">{tx.name}</p>
-                <p className="text-xs text-slate-500">{tx.category?.name ?? '—'} · {formatDate(tx.actual_date)}</p>
-              </div>
-              <div className="text-right">
-                <p className={`text-sm font-bold ${tx.type === 'income' ? 'text-green-400' : 'text-red-400'}`}>
-                  {tx.type === 'income' ? '+' : '-'}{balance(tx.amount)}
-                </p>
-                {tx.status === 'pending' && (
-                  <div className="flex gap-1 mt-1 justify-end">
-                    <button onClick={() => confirmMutation.mutate(tx.id)} className="text-green-500 hover:text-green-400">
-                      <CheckCircle size={14} />
-                    </button>
-                    <button onClick={() => skipMutation.mutate(tx.id)} className="text-slate-500 hover:text-slate-300">
-                      <XCircle size={14} />
-                    </button>
+      {/* Transaction List — grouped by month */}
+      <div className="space-y-4">
+        {isLoading ? (
+          <div className="flex justify-center py-10">
+            <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+          </div>
+        ) : transactions.length === 0 ? (
+          <Card className="bg-slate-900 border-slate-800">
+            <CardContent className="text-center py-12 text-slate-500">No transactions found</CardContent>
+          </Card>
+        ) : grouped.map(({ month, items }) => (
+          <div key={month}>
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 px-1">{month}</p>
+            <Card className="bg-slate-900 border-slate-800">
+              <CardContent className="pt-2 divide-y divide-slate-800">
+                {items.map((tx: any) => (
+                  <div key={tx.id} className="flex items-center gap-3 py-3">
+                    <div className={`p-2 rounded-lg ${typeBg(tx)}`}>
+                      {typeIcon(tx)}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-slate-100 truncate">{tx.name}</p>
+                      <p className="text-xs text-slate-500">{tx.category?.name ?? '—'} · {formatDate(tx.actual_date)}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className={`text-sm font-bold ${tx.type === 'income' ? 'text-green-400' : tx.type === 'transfer' ? 'text-blue-400' : 'text-red-400'}`}>
+                        {tx.type === 'income' ? '+' : tx.type === 'transfer' ? '' : '-'}{balance(tx.amount)}
+                      </p>
+                      {tx.status === 'pending' && (
+                        <div className="flex gap-1 mt-1 justify-end">
+                          <button onClick={() => confirmMutation.mutate(tx.id)} className="text-green-500 hover:text-green-400">
+                            <CheckCircle size={14} />
+                          </button>
+                          <button onClick={() => skipMutation.mutate(tx.id)} className="text-slate-500 hover:text-slate-300">
+                            <XCircle size={14} />
+                          </button>
+                        </div>
+                      )}
+                      {tx.status !== 'pending' && (
+                        <Badge variant="outline" className={`text-[10px] mt-1 ${tx.status === 'confirmed' ? 'border-green-700 text-green-500' : 'border-slate-700 text-slate-500'}`}>
+                          {tx.status}
+                        </Badge>
+                      )}
+                      <div className="flex gap-1 mt-1 justify-end">
+                        <button onClick={() => openView(tx)} className="text-slate-500 hover:text-indigo-400 transition-colors" title="View details">
+                          <Eye size={13} />
+                        </button>
+                        <button onClick={() => openEdit(tx)} className="text-slate-500 hover:text-indigo-400 transition-colors" title="Edit">
+                          <Pencil size={13} />
+                        </button>
+                        <button onClick={() => { setSelectedTx(tx); setDeleteOpen(true); }} className="text-slate-500 hover:text-red-400 transition-colors" title="Delete">
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                )}
-                {tx.status !== 'pending' && (
-                  <Badge variant="outline" className={`text-[10px] mt-1 ${tx.status === 'confirmed' ? 'border-green-700 text-green-500' : 'border-slate-700 text-slate-500'}`}>
-                    {tx.status}
-                  </Badge>
-                )}
-                <div className="flex gap-1 mt-1 justify-end">
-                  <button onClick={() => openEdit(tx)} className="text-slate-500 hover:text-indigo-400 transition-colors" title="Edit">
-                    <Pencil size={13} />
-                  </button>
-                  <button onClick={() => { setSelectedTx(tx); setDeleteOpen(true); }} className="text-slate-500 hover:text-red-400 transition-colors" title="Delete">
-                    <Trash2 size={13} />
-                  </button>
+                ))}
+              </CardContent>
+            </Card>
+          </div>
+        ))}
+      </div>
+
+      {/* View Transaction Detail Dialog */}
+      <Dialog open={viewOpen} onOpenChange={setViewOpen}>
+        <DialogContent className="bg-slate-900 border-slate-800 text-white max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-white">Transaction Details</DialogTitle>
+          </DialogHeader>
+          {selectedTx && (
+            <div className="space-y-4 mt-2">
+              <div className="flex items-center gap-3">
+                <div className={`p-3 rounded-xl ${typeBg(selectedTx)}`}>
+                  {typeIcon(selectedTx)}
+                </div>
+                <div>
+                  <p className="font-semibold text-slate-100">{selectedTx.name}</p>
+                  <p className="text-xs text-slate-500 capitalize">{selectedTx.type}</p>
                 </div>
               </div>
+              <Separator className="bg-slate-800" />
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div>
+                  <p className="text-slate-500 text-xs mb-0.5">Amount</p>
+                  <p className={`font-bold text-base ${selectedTx.type === 'income' ? 'text-green-400' : selectedTx.type === 'transfer' ? 'text-blue-400' : 'text-red-400'}`}>
+                    {selectedTx.type === 'income' ? '+' : selectedTx.type === 'transfer' ? '' : '-'}{balance(selectedTx.amount)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-slate-500 text-xs mb-0.5">Date</p>
+                  <p className="text-slate-200">{formatDate(selectedTx.actual_date)}</p>
+                </div>
+                <div>
+                  <p className="text-slate-500 text-xs mb-0.5">Status</p>
+                  <Badge variant="outline" className={`text-[11px] ${selectedTx.status === 'confirmed' ? 'border-green-700 text-green-500' : selectedTx.status === 'pending' ? 'border-yellow-700 text-yellow-400' : 'border-slate-700 text-slate-400'}`}>
+                    {selectedTx.status}
+                  </Badge>
+                </div>
+                <div>
+                  <p className="text-slate-500 text-xs mb-0.5">Category</p>
+                  <p className="text-slate-200">{selectedTx.category?.name ?? '—'}</p>
+                </div>
+                <div>
+                  <p className="text-slate-500 text-xs mb-0.5">Account</p>
+                  <p className="text-slate-200">{selectedTx.account?.nickname ?? '—'}</p>
+                </div>
+                {selectedTx.to_account && (
+                  <div>
+                    <p className="text-slate-500 text-xs mb-0.5">To Account</p>
+                    <p className="text-slate-200">{selectedTx.to_account?.nickname ?? '—'}</p>
+                  </div>
+                )}
+              </div>
+              {selectedTx.remarks && (
+                <div>
+                  <p className="text-slate-500 text-xs mb-0.5">Remarks</p>
+                  <p className="text-slate-300 text-sm bg-slate-800 rounded-lg px-3 py-2">{selectedTx.remarks}</p>
+                </div>
+              )}
+              {selectedTx.attachment_path && (
+                <div>
+                  <p className="text-slate-500 text-xs mb-1.5">Receipt</p>
+                  <button
+                    onClick={async () => {
+                      try {
+                        await openAuthFile(`/transactions/${selectedTx.id}/receipt`);
+                      } catch {
+                        toast.error('Failed to open receipt');
+                      }
+                    }}
+                    className="inline-flex items-center gap-2 text-sm text-indigo-400 hover:text-indigo-300 bg-indigo-500/10 border border-indigo-500/20 rounded-lg px-3 py-2 transition-colors"
+                  >
+                    <Paperclip size={14} />
+                    View Receipt
+                    <ExternalLink size={12} />
+                  </button>
+                </div>
+              )}
             </div>
-          ))}
-        </CardContent>
-      </Card>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Edit Transaction Sheet */}
       <Sheet open={editOpen} onOpenChange={setEditOpen}>
@@ -370,7 +538,14 @@ export default function TransactionsPage() {
           <SheetHeader>
             <SheetTitle className="text-white">Edit Transaction</SheetTitle>
           </SheetHeader>
-          <form onSubmit={editSubmit((d) => updateMutation.mutate({ id: selectedTx?.id, ...d, amount: parseFloat(d.amount) }))} className="space-y-4 mt-6">
+          <form onSubmit={editSubmit((d) => {
+            const payload: any = { id: selectedTx?.id, ...d, amount: parseFloat(d.amount) };
+            if (d.editReceipt instanceof FileList && d.editReceipt.length > 0) {
+              payload.receipt = d.editReceipt[0];
+            }
+            delete payload.editReceipt;
+            updateMutation.mutate(payload);
+          })} className="space-y-4 mt-6">
             <div className="space-y-1.5">
               <Label className="text-slate-300">Description</Label>
               <Input {...editReg('name', { required: true })} className="bg-slate-800 border-slate-700 text-white" />
@@ -386,6 +561,20 @@ export default function TransactionsPage() {
             <div className="space-y-1.5">
               <Label className="text-slate-300">Remarks</Label>
               <Textarea {...editReg('remarks')} className="bg-slate-800 border-slate-700 text-white" rows={2} />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-slate-300 flex items-center gap-1.5">
+                <Paperclip size={13} /> Replace Receipt <span className="text-slate-600 text-xs">(optional)</span>
+              </Label>
+              {selectedTx?.attachment_path && (
+                <p className="text-xs text-slate-500">Current receipt attached — select a new file to replace it</p>
+              )}
+              <input
+                {...editReg('editReceipt')}
+                type="file"
+                accept=".pdf,.jpg,.jpeg,.png,.webp"
+                className="w-full text-sm text-slate-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-slate-700 file:text-white hover:file:bg-slate-600 cursor-pointer bg-slate-800 border border-slate-700 rounded-lg px-3 py-2"
+              />
             </div>
             <p className="text-xs text-slate-500">Type: <span className="capitalize text-slate-400">{selectedTx?.type}</span> (cannot change)</p>
             <Button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-500" disabled={updateMutation.isPending}>

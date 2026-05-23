@@ -2,7 +2,7 @@
 
 export const dynamic = 'force-dynamic';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -59,7 +59,7 @@ function AsbCalcResults({ fundId, params }: { fundId: number; params: CalcParams
       <div className="grid grid-cols-3 gap-3">
         {[
           { label: 'Projected Balance', value: data.projected_balance, color: 'text-indigo-400' },
-          { label: 'Total Top-ups', value: data.total_topups, color: 'text-green-400' },
+          { label: 'Total Principal', value: data.total_principal, color: 'text-green-400' },
           { label: 'Total Dividends', value: data.total_dividends, color: 'text-purple-400' },
         ].map(({ label, value, color }) => (
           <Card key={label} className="bg-slate-900 border-slate-800">
@@ -166,13 +166,30 @@ function AsbDividendsTab({ fund }: { fund: AsbFund }) {
   const createDividend = useCreateAsbDividend(fund.id);
   const deleteDividend = useDeleteAsbDividend(fund.id);
 
+  const groupedDivs = useMemo(() => {
+    const map = new Map<number, any[]>();
+    for (const d of dividends as any[]) {
+      if (!map.has(d.year)) map.set(d.year, []);
+      map.get(d.year)!.push(d);
+    }
+    return Array.from(map.entries())
+      .sort((a, b) => b[0] - a[0])
+      .map(([year, items]) => ({ year, items }));
+  }, [dividends]);
+
   const { register, handleSubmit, reset, formState: { errors } } = useForm<DivForm>({
     resolver: zodResolver(divSchema),
     defaultValues: { year: new Date().getFullYear() - 1, dividend_rate: 5.5, dividend_amount: 0 },
   });
 
   const onAdd = (data: DivForm) => {
-    createDividend.mutate(data, {
+    const payload = {
+      ...data,
+      dividend_rate: data.dividend_rate,           // stays as percent (backend now accepts 0-100)
+      bonus_rate: data.bonus_rate ?? undefined,
+      total_payout: data.dividend_amount + (data.bonus_amount ?? 0),
+    };
+    createDividend.mutate(payload, {
       onSuccess: () => { toast.success('Dividend added'); reset(); setAddOpen(false); },
       onError: (e: any) => toast.error(e.response?.data?.message ?? 'Failed to add dividend'),
     });
@@ -189,38 +206,44 @@ function AsbDividendsTab({ fund }: { fund: AsbFund }) {
       {dividends.length === 0 ? (
         <div className="py-12 text-center text-slate-500 text-sm">No dividends recorded yet</div>
       ) : (
-        <Card className="bg-slate-900 border-slate-800">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-slate-800">
-                  {['Year', 'Div Rate', 'Dividend', 'Bonus', 'Total Payout', ''].map((h) => (
-                    <th key={h} className={`px-4 py-3 text-xs text-slate-500 font-medium ${h === '' || h === 'Year' ? 'text-left' : 'text-right'}`}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800">
-                {(dividends as any[]).map((d) => (
-                  <tr key={d.id} className="hover:bg-slate-800/30 transition-colors">
-                    <td className="px-4 py-3 text-slate-200 font-medium">{d.year}</td>
-                    <td className="px-4 py-3 text-right text-indigo-400">{d.dividend_rate}%</td>
-                    <td className="px-4 py-3 text-right text-slate-300">{formatRM(d.dividend_amount)}</td>
-                    <td className="px-4 py-3 text-right text-slate-400">
-                      {d.bonus_amount ? `${formatRM(d.bonus_amount)} (${d.bonus_rate}%)` : '—'}
-                    </td>
-                    <td className="px-4 py-3 text-right text-green-400 font-semibold">{formatRM(d.total_payout)}</td>
-                    <td className="px-4 py-3 text-right">
-                      <Button variant="ghost" size="icon" onClick={() => setDeleteId(d.id)}
-                        className="w-7 h-7 text-slate-500 hover:text-red-400 hover:bg-red-500/10">
-                        <Trash2 size={14} />
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
+        <div className="space-y-4">
+          {groupedDivs.map(({ year, items }) => (
+            <div key={year}>
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 px-1">{year}</p>
+              <Card className="bg-slate-900 border-slate-800">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-800">
+                        {['Div Rate', 'Dividend', 'Bonus', 'Total Payout', ''].map((h) => (
+                          <th key={h} className={`px-4 py-3 text-xs text-slate-500 font-medium ${h === '' ? 'text-left' : 'text-right'}`}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800">
+                      {items.map((d: any) => (
+                        <tr key={d.id} className="hover:bg-slate-800/30 transition-colors">
+                          <td className="px-4 py-3 text-right text-indigo-400">{d.dividend_rate}%</td>
+                          <td className="px-4 py-3 text-right text-slate-300">{formatRM(d.dividend_amount)}</td>
+                          <td className="px-4 py-3 text-right text-slate-400">
+                            {d.bonus_amount ? `${formatRM(d.bonus_amount)} (${d.bonus_rate}%)` : '—'}
+                          </td>
+                          <td className="px-4 py-3 text-right text-green-400 font-semibold">{formatRM(d.total_payout)}</td>
+                          <td className="px-4 py-3 text-right">
+                            <Button variant="ghost" size="icon" onClick={() => setDeleteId(d.id)}
+                              className="w-7 h-7 text-slate-500 hover:text-red-400 hover:bg-red-500/10">
+                              <Trash2 size={14} />
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+            </div>
+          ))}
+        </div>
       )}
 
       <Sheet open={addOpen} onOpenChange={setAddOpen}>
@@ -307,6 +330,17 @@ function AsbTransactionsTab({ fund }: { fund: AsbFund }) {
   const createTx = useCreateAsbTransaction(fund.id);
   const deleteTx = useDeleteAsbTransaction(fund.id);
 
+  const groupedTxs = useMemo(() => {
+    const map = new Map<string, any[]>();
+    for (const tx of transactions as any[]) {
+      const d = tx.date ? new Date(tx.date) : new Date();
+      const label = d.toLocaleString('default', { month: 'long', year: 'numeric' });
+      if (!map.has(label)) map.set(label, []);
+      map.get(label)!.push(tx);
+    }
+    return Array.from(map.entries()).map(([month, items]) => ({ month, items }));
+  }, [transactions]);
+
   const { register, handleSubmit, reset, formState: { errors } } = useForm<TxForm>({
     resolver: zodResolver(txSchema),
     defaultValues: {
@@ -334,43 +368,50 @@ function AsbTransactionsTab({ fund }: { fund: AsbFund }) {
       {transactions.length === 0 ? (
         <div className="py-12 text-center text-slate-500 text-sm">No transactions recorded yet</div>
       ) : (
-        <Card className="bg-slate-900 border-slate-800">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-slate-800">
-                  {['Date', 'Type', 'Amount', 'Remarks', ''].map((h, i) => (
-                    <th key={i} className={`px-4 py-3 text-xs text-slate-500 font-medium ${h === 'Amount' ? 'text-right' : 'text-left'}`}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800">
-                {(transactions as any[]).map((tx) => (
-                  <tr key={tx.id} className="hover:bg-slate-800/30 transition-colors">
-                    <td className="px-4 py-3 text-slate-400 text-xs">{formatDate(tx.date)}</td>
-                    <td className="px-4 py-3">
-                      <Badge className={tx.transaction_type === 'deposit'
-                        ? 'bg-green-500/15 text-green-400 border-green-500/30 text-xs'
-                        : 'bg-red-500/15 text-red-400 border-red-500/30 text-xs'}>
-                        {tx.transaction_type}
-                      </Badge>
-                    </td>
-                    <td className={`px-4 py-3 text-right font-semibold tabular-nums ${tx.transaction_type === 'deposit' ? 'text-green-400' : 'text-red-400'}`}>
-                      {tx.transaction_type === 'deposit' ? '+' : '-'}{bal(tx.amount)}
-                    </td>
-                    <td className="px-4 py-3 text-slate-500 text-xs">{tx.remarks ?? '—'}</td>
-                    <td className="px-4 py-3 text-right">
-                      <Button variant="ghost" size="icon" onClick={() => setDeleteId(tx.id)}
-                        className="w-7 h-7 text-slate-500 hover:text-red-400 hover:bg-red-500/10">
-                        <Trash2 size={14} />
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
+        <div className="space-y-4">
+          {groupedTxs.map(({ month, items }) => (
+            <div key={month}>
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 px-1">{month}</p>
+              <Card className="bg-slate-900 border-slate-800">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-800">
+                        {['Date', 'Type', 'Amount', 'Remarks', ''].map((h, i) => (
+                          <th key={i} className={`px-4 py-3 text-xs text-slate-500 font-medium ${h === 'Amount' ? 'text-right' : 'text-left'}`}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800">
+                      {items.map((tx: any) => (
+                        <tr key={tx.id} className="hover:bg-slate-800/30 transition-colors">
+                          <td className="px-4 py-3 text-slate-400 text-xs">{formatDate(tx.date)}</td>
+                          <td className="px-4 py-3">
+                            <Badge className={tx.transaction_type === 'deposit'
+                              ? 'bg-green-500/15 text-green-400 border-green-500/30 text-xs'
+                              : 'bg-red-500/15 text-red-400 border-red-500/30 text-xs'}>
+                              {tx.transaction_type}
+                            </Badge>
+                          </td>
+                          <td className={`px-4 py-3 text-right font-semibold tabular-nums ${tx.transaction_type === 'deposit' ? 'text-green-400' : 'text-red-400'}`}>
+                            {tx.transaction_type === 'deposit' ? '+' : '-'}{bal(tx.amount)}
+                          </td>
+                          <td className="px-4 py-3 text-slate-500 text-xs">{tx.remarks ?? '—'}</td>
+                          <td className="px-4 py-3 text-right">
+                            <Button variant="ghost" size="icon" onClick={() => setDeleteId(tx.id)}
+                              className="w-7 h-7 text-slate-500 hover:text-red-400 hover:bg-red-500/10">
+                              <Trash2 size={14} />
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+            </div>
+          ))}
+        </div>
       )}
 
       <Sheet open={addOpen} onOpenChange={setAddOpen}>

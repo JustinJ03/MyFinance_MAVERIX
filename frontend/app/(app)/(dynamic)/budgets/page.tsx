@@ -21,15 +21,15 @@ import { Plus, Trash2, ShieldAlert, CheckCircle2, Pencil, Power } from 'lucide-r
 import ConfirmDialog from '@/components/common/ConfirmDialog';
 
 const STATUS_COLORS = {
-  on_track: 'text-green-400 border-green-500/20 bg-green-500/10',
-  approaching: 'text-yellow-400 border-yellow-500/20 bg-yellow-500/10',
-  exceeded: 'text-red-400 border-red-500/20 bg-red-500/10',
+  on_track:   'text-green-400 border-green-500/20 bg-green-500/10',
+  approaching:'text-yellow-400 border-yellow-500/20 bg-yellow-500/10',
+  exceeded:   'text-red-400 border-red-500/20 bg-red-500/10',
 };
 
 const PROGRESS_COLORS = {
-  on_track: '#22c55e',
-  approaching: '#eab308',
-  exceeded: '#ef4444',
+  on_track:   '#22c55e',
+  approaching:'#eab308',
+  exceeded:   '#ef4444',
 };
 
 export default function BudgetsPage() {
@@ -41,7 +41,7 @@ export default function BudgetsPage() {
   const [selectedBudget, setSelectedBudget] = useState<any>(null);
 
   const { register, handleSubmit, control, reset } = useForm({
-    defaultValues: { category_id: '', amount_limit: '', period_type: 'monthly', rollover: false }
+    defaultValues: { category_id: '', amount_limit: '', period_type: 'monthly' }
   });
   const { register: editReg, handleSubmit: editSubmit, control: editCtrl, reset: editReset } = useForm();
 
@@ -69,7 +69,7 @@ export default function BudgetsPage() {
   });
 
   const updateMutation = useMutation({
-    mutationFn: (d: any) => api.put(`/budgets/${selectedBudget?.budget_id}`, d),
+    mutationFn: (d: any) => api.put(`/budgets/${selectedBudget?.id}`, d),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['budgets'] });
       qc.invalidateQueries({ queryKey: ['dashboard'] });
@@ -101,7 +101,7 @@ export default function BudgetsPage() {
 
   const openEdit = (b: any) => {
     setSelectedBudget(b);
-    editReset({ amount_limit: b.limit, period_type: b.period_type ?? 'monthly', rollover: b.rollover ?? false });
+    editReset({ amount_limit: b.amount_limit ?? b.limit, period_type: b.period_type ?? 'monthly' });
     setEditOpen(true);
   };
 
@@ -155,10 +155,6 @@ export default function BudgetsPage() {
                   </Select>
                 )} />
               </div>
-              <div className="flex items-center gap-2 pt-2">
-                <input type="checkbox" {...register('rollover')} id="rollover" className="rounded border-slate-700 text-indigo-600 bg-slate-800 focus:ring-indigo-500 focus:ring-offset-slate-900" />
-                <Label htmlFor="rollover" className="text-slate-300 text-sm cursor-pointer select-none">Rollover remaining budget to next period</Label>
-              </div>
               <Button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-500" disabled={createMutation.isPending}>
                 {createMutation.isPending ? 'Creating…' : 'Create Budget'}
               </Button>
@@ -169,11 +165,11 @@ export default function BudgetsPage() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {isLoading ? (
-          <div className="col-span-full flex justify-center py-12">
+          <div key="loading" className="col-span-full flex justify-center py-12">
             <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
           </div>
         ) : budgets.length === 0 ? (
-          <Card className="col-span-full bg-slate-900 border-slate-800 py-16 text-center">
+          <Card key="empty" className="col-span-full bg-slate-900 border-slate-800 py-16 text-center">
             <CardContent>
               <p className="font-semibold text-slate-300">No active budgets set</p>
               <p className="text-sm text-slate-500 mt-1">Create limits to keep your spending in check</p>
@@ -181,15 +177,19 @@ export default function BudgetsPage() {
           </Card>
         ) : (
           budgets.map((b: any) => {
-            const statusColor = STATUS_COLORS[b.status as keyof typeof STATUS_COLORS] ?? STATUS_COLORS.on_track;
-            const progressColor = PROGRESS_COLORS[b.status as keyof typeof PROGRESS_COLORS] ?? PROGRESS_COLORS.on_track;
+            const spent = b.current_period?.amount_spent ?? b.spent ?? 0;
+            const limit = b.amount_limit ?? b.limit ?? 0;
+            const pct = limit > 0 ? (parseFloat(spent) / parseFloat(limit)) * 100 : 0;
+            const status = pct >= 100 ? 'exceeded' : pct >= 70 ? 'approaching' : 'on_track';
+            const statusColor = STATUS_COLORS[status as keyof typeof STATUS_COLORS];
+            const progressColor = PROGRESS_COLORS[status as keyof typeof PROGRESS_COLORS];
 
             return (
-              <Card key={b.budget_id} className={`bg-slate-900 border-slate-800 hover:border-slate-700/60 transition-all flex flex-col justify-between ${b.is_active === false ? 'opacity-50' : ''}`}>
+              <Card key={b.id} className={`bg-slate-900 border-slate-800 hover:border-slate-700/60 transition-all flex flex-col justify-between ${b.is_active === false ? 'opacity-50' : ''}`}>
                 <CardHeader className="flex flex-row items-start justify-between pb-2">
                   <div>
                     <div className="flex items-center gap-2">
-                      <CardTitle className="text-base text-slate-100 font-bold">{b.category}</CardTitle>
+                      <CardTitle className="text-base text-slate-100 font-bold">{b.category?.name ?? '—'}</CardTitle>
                       {b.is_active === false && (
                         <Badge variant="outline" className="text-[10px] text-slate-500 border-slate-700">Inactive</Badge>
                       )}
@@ -201,7 +201,7 @@ export default function BudgetsPage() {
                       <Pencil size={16} />
                     </button>
                     <button
-                      onClick={() => toggleMutation.mutate(b.budget_id)}
+                      onClick={() => toggleMutation.mutate(b.id)}
                       className={`p-1 transition-colors ${b.is_active === false ? 'text-slate-600 hover:text-green-400' : 'text-slate-500 hover:text-yellow-400'}`}
                       title={b.is_active === false ? 'Activate budget' : 'Deactivate budget'}
                     >
@@ -215,24 +215,24 @@ export default function BudgetsPage() {
                 <CardContent className="space-y-4">
                   <div className="flex justify-between items-baseline">
                     <div>
-                      <span className="text-2xl font-black text-white">{balance(b.spent)}</span>
+                      <span className="text-2xl font-black text-white">{balance(spent)}</span>
                       <span className="text-xs text-slate-500 ml-1">spent</span>
                     </div>
                     <div className="text-right">
-                      <span className="text-sm font-semibold text-slate-300">Limit: {balance(b.limit)}</span>
+                      <span className="text-sm font-semibold text-slate-300">Limit: {balance(limit)}</span>
                     </div>
                   </div>
                   <div className="space-y-1">
-                    <Progress value={Math.min(b.percentage, 100)} className="h-2 bg-slate-800"
+                    <Progress value={Math.min(pct, 100)} className="h-2 bg-slate-800"
                       style={{ '--progress-color': progressColor } as any} />
                     <div className="flex justify-between text-[11px] text-slate-500">
-                      <span>{b.percentage.toFixed(0)}% used</span>
-                      <span>{b.limit - b.spent >= 0 ? `${balance(b.limit - b.spent)} left` : `${balance(Math.abs(b.limit - b.spent))} over limit`}</span>
+                      <span>{pct.toFixed(0)}% used</span>
+                      <span>{parseFloat(limit) - parseFloat(spent) >= 0 ? `${balance(parseFloat(limit) - parseFloat(spent))} left` : `${balance(Math.abs(parseFloat(limit) - parseFloat(spent)))} over limit`}</span>
                     </div>
                   </div>
                   <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold select-none ${statusColor}`}>
-                    {b.status === 'exceeded' || b.status === 'approaching' ? <ShieldAlert size={14} /> : <CheckCircle2 size={14} />}
-                    <span className="capitalize">{b.status.replace('_', ' ')}</span>
+                    {status === 'exceeded' || status === 'approaching' ? <ShieldAlert size={14} /> : <CheckCircle2 size={14} />}
+                    <span className="capitalize">{status.replace('_', ' ')}</span>
                   </div>
                 </CardContent>
               </Card>
@@ -245,7 +245,7 @@ export default function BudgetsPage() {
       <Sheet open={editOpen} onOpenChange={setEditOpen}>
         <SheetContent className="bg-slate-900 border-slate-800 text-white w-full sm:max-w-md">
           <SheetHeader><SheetTitle className="text-white">Edit Budget</SheetTitle></SheetHeader>
-          <form onSubmit={editSubmit((d) => updateMutation.mutate({ ...d, amount_limit: parseFloat(d.amount_limit) }))} className="space-y-4 mt-6">
+          <form onSubmit={editSubmit((d) => updateMutation.mutate({ amount_limit: parseFloat(d.amount_limit), period_type: d.period_type }))} className="space-y-4 mt-6">
             <div className="space-y-1.5">
               <Label className="text-slate-300">Budget Limit (RM)</Label>
               <Input {...editReg('amount_limit', { required: true })} type="number" step="0.01" className="bg-slate-800 border-slate-700 text-white" />
@@ -262,10 +262,6 @@ export default function BudgetsPage() {
                 </Select>
               )} />
             </div>
-            <div className="flex items-center gap-2">
-              <input type="checkbox" {...editReg('rollover')} id="edit-rollover" className="rounded border-slate-700 text-indigo-600 bg-slate-800" />
-              <Label htmlFor="edit-rollover" className="text-slate-300 text-sm cursor-pointer">Rollover unused budget</Label>
-            </div>
             <Button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-500" disabled={updateMutation.isPending}>
               {updateMutation.isPending ? 'Saving…' : 'Save Changes'}
             </Button>
@@ -277,7 +273,7 @@ export default function BudgetsPage() {
         open={deleteOpen}
         title="Delete budget?"
         description="This will permanently remove this budget and its tracking data."
-        onConfirm={() => deleteMutation.mutate(selectedBudget?.budget_id)}
+        onConfirm={() => deleteMutation.mutate(selectedBudget?.id)}
         onCancel={() => setDeleteOpen(false)}
         loading={deleteMutation.isPending}
       />

@@ -52,7 +52,7 @@ export function useCreateAsbTransaction(fundId: number) {
   return useMutation({
     mutationFn: (payload: StoreAsbTransactionPayload) => api.post(`/asb/${fundId}/transactions`, payload),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['asb', fundId] });
+      qc.invalidateQueries({ queryKey: ['asb'] });
       qc.invalidateQueries({ queryKey: ['asb', fundId, 'transactions'] });
       qc.invalidateQueries({ queryKey: ['dashboard'] });
     },
@@ -64,7 +64,7 @@ export function useDeleteAsbTransaction(fundId: number) {
   return useMutation({
     mutationFn: (txId: number) => api.delete(`/asb/${fundId}/transactions/${txId}`),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['asb', fundId] });
+      qc.invalidateQueries({ queryKey: ['asb'] });
       qc.invalidateQueries({ queryKey: ['asb', fundId, 'transactions'] });
     },
   });
@@ -83,6 +83,7 @@ export function useCreateAsbDividend(fundId: number) {
   return useMutation({
     mutationFn: (payload: StoreAsbDividendPayload) => api.post(`/asb/${fundId}/dividends`, payload),
     onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['asb'] });
       qc.invalidateQueries({ queryKey: ['asb', fundId, 'dividends'] });
       qc.invalidateQueries({ queryKey: ['dashboard'] });
     },
@@ -93,7 +94,10 @@ export function useDeleteAsbDividend(fundId: number) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (divId: number) => api.delete(`/asb/${fundId}/dividends/${divId}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['asb', fundId, 'dividends'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['asb'] });
+      qc.invalidateQueries({ queryKey: ['asb', fundId, 'dividends'] });
+    },
   });
 }
 
@@ -113,7 +117,13 @@ export function useAsbCalculator(fundId: number, params: {
 }) {
   return useQuery({
     queryKey: ['asb', fundId, 'calculator', params],
-    queryFn: () => api.get(`/asb/${fundId}/calculator`, { params }).then((r) => r.data.data),
-    enabled: !!fundId && Object.values(params).every((v) => v !== undefined),
+    queryFn: () => api.get(`/asb/${fundId}/calculator`, {
+      params: {
+        monthly_top_up: params.monthly_topup,
+        annual_rate: params.annual_dividend_rate / 100,
+        years: params.years,
+      },
+    }).then((r) => r.data.data),
+    enabled: !!fundId && params.years > 0,
   });
 }

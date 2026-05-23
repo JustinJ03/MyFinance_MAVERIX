@@ -7,13 +7,19 @@ A Malaysian-focused personal finance tracker built with **Laravel 11** (API) + *
 
 ## Features
 
-- Bank Account Management (multi-account, transfers, archive)
-- Expense & Income Tracking (two-level categories, receipts)
-- Recurring Transactions (Template → Pending → Confirm flow)
-- Budget Tracker (progress bars, rollover, alerts)
-- Monitoring Dashboard (net worth, cashflow, spending breakdown)
-- EPF Tracker (3 sub-accounts, calculators, auto-sync)
-- ASB/ASNB Tracker (multi-fund, dividends, compound calculator)
+### Core
+- **Bank Account Management** — multi-account support, transfers between accounts, archive/restore
+- **Expense & Income Tracking** — two-level category hierarchy, receipt attachments (PDF/image, up to 15 MB), group-by-month list view
+- **Recurring Transactions** — template-based scheduling with Pending → Confirm/Skip flow
+- **Budget Tracker** — per-category monthly/weekly limits, real-time progress bars, on-track/approaching/exceeded alerts
+- **Monitoring Dashboard** — net worth snapshot, cashflow chart, spending breakdown by category
+
+### Investment Trackers
+- **EPF Tracker** — 3 sub-accounts (Persaraan/Sejahtera/Fleksibel), mandatory contribution auto-split (75/15/10), dividend tracking with auto-calculation, balance-over-time chart, retirement projection calculator
+- **ASB/ASNB Tracker** — multi-fund support (ASB, ASB2, ASM, ASM2 Wawasan, ASM3), deposit/withdrawal history grouped by month, annual dividends with bonus tracking, compound growth calculator
+
+### Document Management
+- **Bank Statements** — upload, view, and delete PDF/image statements per bank account (up to 20 MB), labelled by period
 
 ---
 
@@ -23,8 +29,10 @@ A Malaysian-focused personal finance tracker built with **Laravel 11** (API) + *
 |---|---|
 | Backend API | Laravel 11 + Sanctum |
 | Frontend | Next.js 16 App Router + Tailwind CSS v4 + shadcn/ui |
+| State / Data | TanStack Query v5 + React Hook Form |
+| Charts | Recharts |
 | Database | MySQL 8 |
-| Cache / Queue | Redis 7 |
+| Local File Storage | Laravel `local` disk (receipts & statements) |
 | Container | Docker Compose |
 
 ---
@@ -45,7 +53,7 @@ git clone https://github.com/JustinJ03/MyFinance_MAVERIX.git
 cd MyFinance_MAVERIX
 
 # 2. Copy environment files
-cp .env.example backend/.env
+cp backend/.env.example backend/.env          # pre-filled for Docker
 cp frontend/.env.local.example frontend/.env.local
 
 # 3. Start all services (nginx, laravel, nextjs, mysql, redis)
@@ -76,7 +84,7 @@ cd backend
 composer install
 cp .env.example .env
 
-# Edit .env — set DB_* and REDIS_* to match your local services
+# Edit .env — set DB_* to match your local MySQL instance
 php artisan key:generate
 php artisan migrate --seed
 php artisan serve
@@ -90,7 +98,7 @@ cd frontend
 npm install
 cp .env.local.example .env.local
 
-# Edit .env.local if your API runs on a different port/host
+# Edit .env.local — set the API base URL
 # NEXT_PUBLIC_API_URL=http://127.0.0.1:8000/api/v1
 
 npm run dev
@@ -106,7 +114,7 @@ npm run dev
 | Key | Description | Default |
 |---|---|---|
 | `APP_KEY` | Laravel application key (auto-generated) | — |
-| `DB_CONNECTION` | Database driver | `sqlite` |
+| `DB_CONNECTION` | Database driver | `mysql` |
 | `DB_HOST` | MySQL host (Docker: `mysql`) | `127.0.0.1` |
 | `DB_DATABASE` | Database name | `myfinance` |
 | `DB_USERNAME` | Database user | `myfinance` |
@@ -125,18 +133,53 @@ npm run dev
 
 ```
 MyFinance_MAVERIX/
-├── backend/          # Laravel 11 API
+├── backend/                        # Laravel 11 API
 │   ├── app/
+│   │   ├── Http/Controllers/Api/   # API controllers
+│   │   ├── Models/                 # Eloquent models
+│   │   └── Services/               # Business logic (TransactionService, EpfService, …)
 │   ├── database/
+│   │   ├── migrations/
+│   │   └── seeders/
 │   └── routes/api.php
-├── frontend/         # Next.js 16 App Router
+├── frontend/                       # Next.js 16 App Router
 │   ├── app/
-│   │   ├── (auth)/   # Login / Register
-│   │   └── (app)/    # Authenticated pages
-│   └── components/
-├── docker/           # Docker configs (nginx, php, node, mysql)
+│   │   ├── (auth)/                 # Login / Register pages
+│   │   └── (app)/
+│   │       ├── (dynamic)/          # Authenticated feature pages
+│   │       │   ├── accounts/       # Bank accounts + statement manager
+│   │       │   ├── transactions/   # Transactions with receipt upload
+│   │       │   ├── budgets/        # Budget tracker
+│   │       │   ├── epf/            # EPF tracker + analytics + calculator
+│   │       │   └── asb/            # ASB/ASNB tracker + calculator
+│   │       └── (static)/           # Dashboard
+│   ├── components/
+│   │   ├── ui/                     # shadcn/ui primitives
+│   │   └── common/                 # Shared components (ConfirmDialog, …)
+│   ├── hooks/                      # TanStack Query hooks (useAsb, useEpf, useAccounts)
+│   ├── lib/                        # API client (axios + auth interceptor)
+│   └── types/                      # TypeScript interfaces
+├── docker/                         # Docker configs (nginx, php, node)
 └── docker-compose.yml
 ```
+
+---
+
+## API Endpoints (key routes)
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/auth/login` | Authenticate and receive token |
+| `GET` | `/accounts` | List bank accounts |
+| `GET` | `/transactions` | List transactions (filterable by type/status) |
+| `GET` | `/transactions/{id}/receipt` | Stream receipt file (auth required) |
+| `POST` | `/transactions/{id}/receipt` | Replace receipt attachment |
+| `GET` | `/budgets/overview` | Budget status for current period |
+| `GET` | `/accounts/{id}/statements` | List bank statements |
+| `GET` | `/accounts/{id}/statements/{sid}/download` | Stream statement file (auth required) |
+| `GET` | `/epf` | EPF overview (balances per account) |
+| `GET` | `/epf/calculator/retirement` | Retirement projection |
+| `GET` | `/asb/{fund}/calculator` | ASB compound growth projection |
 
 ---
 
@@ -154,6 +197,9 @@ docker compose exec laravel php artisan optimize:clear
 
 # View logs
 docker compose logs -f
+
+# Run a fresh migration with seed data
+docker compose exec laravel php artisan migrate:fresh --seed
 ```
 
 ---
@@ -168,9 +214,9 @@ Built for **Hackathon X: FinTech Forward 2026**
 
 This project was developed with the assistance of AI coding agents:
 
-| Tool | Model |
-|---|---|
-| Claude Code (Anthropic) | Claude Sonnet 4.6 |
-| Antigravity IDE | Google Gemini 2.5 Pro |
+| Tool | Model | Usage |
+|---|---|---|
+| Claude Code (Anthropic) | Claude Sonnet 4.5 / 4.6 | Architecture design, code generation, debugging, sprint planning, code review |
+| Antigravity IDE | Google Gemini 2.5 Pro | Supplementary code suggestions and research |
 
-AI was used for architecture design, code generation, debugging, and sprint planning throughout the hackathon.
+AI tools were used throughout the entire development lifecycle — from initial architecture decisions and database schema design, to feature implementation, bug fixes, and documentation.

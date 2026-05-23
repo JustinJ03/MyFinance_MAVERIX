@@ -71,10 +71,16 @@ class BudgetController extends Controller
 
         $data = $request->validate([
             'amount_limit' => 'sometimes|numeric|min:0.01',
+            'period_type'  => 'sometimes|in:monthly,weekly',
             'rollover'     => 'boolean',
         ]);
 
         $budget->update($data);
+
+        if (isset($data['amount_limit'])) {
+            $budget->currentPeriod()?->update(['amount_limit' => $data['amount_limit']]);
+        }
+
         return $this->success($budget->fresh('category'), 'Budget updated');
     }
 

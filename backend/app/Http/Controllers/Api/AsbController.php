@@ -28,11 +28,16 @@ class AsbController extends Controller
     public function store(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'fund_name' => 'required|in:ASB,ASB2,ASM,ASM2_Wawasan,ASM3',
+            'fund_name'  => 'required|in:ASB,ASB2,ASM,ASM2_Wawasan,ASM3',
+            'units_held' => 'nullable|numeric|min:0',
         ]);
 
         $unitCeiling = AsbFund::UNIT_CEILINGS[$data['fund_name']] ?? 200000;
-        $fund = $request->user()->asbFunds()->create([...$data, 'unit_ceiling' => $unitCeiling]);
+        $fund = $request->user()->asbFunds()->create([
+            'fund_name'   => $data['fund_name'],
+            'units_held'  => $data['units_held'] ?? 0,
+            'unit_ceiling'=> $unitCeiling,
+        ]);
 
         return $this->created($fund, 'ASB fund registered');
     }
@@ -97,12 +102,15 @@ class AsbController extends Controller
 
         $data = $request->validate([
             'year'           => 'required|integer|min:2000|max:2099',
-            'dividend_rate'  => 'required|numeric|min:0|max:1',
+            'dividend_rate'  => 'required|numeric|min:0|max:100',
             'dividend_amount'=> 'required|numeric|min:0',
-            'bonus_rate'     => 'nullable|numeric|min:0|max:1',
+            'bonus_rate'     => 'nullable|numeric|min:0|max:100',
             'bonus_amount'   => 'nullable|numeric|min:0',
-            'total_payout'   => 'required|numeric|min:0',
+            'total_payout'   => 'nullable|numeric|min:0',
         ]);
+
+        // Derive total_payout if not sent
+        $data['total_payout'] ??= ($data['dividend_amount'] + ($data['bonus_amount'] ?? 0));
 
         $dividend = $this->service->addDividend($asbFund, $data);
         return $this->created($dividend, 'Dividend recorded');

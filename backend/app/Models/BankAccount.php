@@ -38,6 +38,11 @@ class BankAccount extends Model
         return $this->hasMany(Transaction::class, 'to_account_id');
     }
 
+    public function statements(): HasMany
+    {
+        return $this->hasMany(BankStatement::class, 'bank_account_id');
+    }
+
     public function scopeActive($query)
     {
         return $query->where('status', 'active');

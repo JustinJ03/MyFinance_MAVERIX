@@ -8,6 +8,7 @@ use App\Services\TransactionService;
 use App\Traits\ApiResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 
 class TransactionController extends Controller
 {
@@ -60,7 +61,12 @@ class TransactionController extends Controller
             'status'                => 'in:pending,confirmed',
             'remarks'               => 'nullable|string',
             'epf_account_number'    => 'nullable|in:1,2,3',
+            'receipt'               => 'nullable|file|mimes:pdf,jpg,jpeg,png,webp|max:15360',
         ]);
+
+        if ($request->hasFile('receipt')) {
+            $data['attachment_path'] = $request->file('receipt')->store('receipts/' . $request->user()->id, 'local');
+        }
 
         $data['user_id'] = $request->user()->id;
         $data['status']  = $data['status'] ?? 'confirmed';
@@ -86,6 +92,28 @@ class TransactionController extends Controller
 
         $transaction = $this->service->update($transaction, $data);
         return $this->success($transaction, 'Transaction updated');
+    }
+
+    public function receipt(Request $request, Transaction $transaction)
+    {
+        $this->authorise($request, $transaction);
+        abort_if(!$transaction->attachment_path, 404, 'No receipt attached');
+        abort_if(!Storage::disk('local')->exists($transaction->attachment_path), 404, 'File not found');
+        return Storage::disk('local')->response($transaction->attachment_path);
+    }
+
+    public function updateReceipt(Request $request, Transaction $transaction): JsonResponse
+    {
+        $this->authorise($request, $transaction);
+        $request->validate(['receipt' => 'required|file|mimes:pdf,jpg,jpeg,png,webp|max:15360']);
+
+        if ($transaction->attachment_path) {
+            Storage::disk('local')->delete($transaction->attachment_path);
+        }
+        $path = $request->file('receipt')->store('receipts/' . $request->user()->id, 'local');
+        $transaction->update(['attachment_path' => $path]);
+
+        return $this->success($transaction->fresh(['category.parent', 'account']), 'Receipt updated');
     }
 
     public function destroy(Request $request, Transaction $transaction): JsonResponse
