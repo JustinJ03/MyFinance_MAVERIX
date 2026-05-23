@@ -12,9 +12,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Progress } from '@/components/ui/progress';
+import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { useForm, Controller } from 'react-hook-form';
-import { Plus, Trash2, ShieldAlert, CheckCircle2, TrendingUp } from 'lucide-react';
+import { Plus, Trash2, ShieldAlert, CheckCircle2, Pencil, Power } from 'lucide-react';
+import ConfirmDialog from '@/components/common/ConfirmDialog';
 
 const STATUS_COLORS = {
   on_track: 'text-green-400 border-green-500/20 bg-green-500/10',
@@ -32,14 +34,14 @@ export default function BudgetsPage() {
   const qc = useQueryClient();
   const { balanceVisible } = useUiStore();
   const [open, setOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [selectedBudget, setSelectedBudget] = useState<any>(null);
+
   const { register, handleSubmit, control, reset } = useForm({
-    defaultValues: {
-      category_id: '',
-      amount_limit: '',
-      period_type: 'monthly',
-      rollover: false,
-    }
+    defaultValues: { category_id: '', amount_limit: '', period_type: 'monthly', rollover: false }
   });
+  const { register: editReg, handleSubmit: editSubmit, control: editCtrl, reset: editReset } = useForm();
 
   const { data: budgets = [], isLoading } = useQuery({
     queryKey: ['budgets'],
@@ -51,7 +53,6 @@ export default function BudgetsPage() {
     queryFn: () => api.get('/categories').then((r) => r.data.data ?? []),
   });
 
-  // Filter only parent categories and child categories that are expense types
   const expenseCategories = categories.filter((c: any) => c.type === 'expense');
 
   const createMutation = useMutation({
@@ -59,11 +60,30 @@ export default function BudgetsPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['budgets'] });
       qc.invalidateQueries({ queryKey: ['dashboard'] });
-      setOpen(false);
-      reset();
+      setOpen(false); reset();
       toast.success('Budget created successfully!');
     },
-    onError: (e: any) => toast.error(e.response?.data?.message ?? 'Failed to create budget'),
+    onError: (e: any) => toast.error(e.response?.data?.message ?? 'Failed'),
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: (d: any) => api.put(`/budgets/${selectedBudget?.budget_id}`, d),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['budgets'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+      setEditOpen(false);
+      toast.success('Budget updated');
+    },
+    onError: (e: any) => toast.error(e.response?.data?.message ?? 'Failed'),
+  });
+
+  const toggleMutation = useMutation({
+    mutationFn: (id: number) => api.patch(`/budgets/${id}/toggle`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['budgets'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+      toast.success('Budget toggled');
+    },
   });
 
   const deleteMutation = useMutation({
@@ -71,10 +91,17 @@ export default function BudgetsPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['budgets'] });
       qc.invalidateQueries({ queryKey: ['dashboard'] });
+      setDeleteOpen(false);
       toast.success('Budget deleted');
     },
-    onError: (e: any) => toast.error(e.response?.data?.message ?? 'Failed to delete budget'),
+    onError: (e: any) => toast.error(e.response?.data?.message ?? 'Failed'),
   });
+
+  const openEdit = (b: any) => {
+    setSelectedBudget(b);
+    editReset({ amount_limit: b.limit, period_type: b.period_type ?? 'monthly', rollover: b.rollover ?? false });
+    setEditOpen(true);
+  };
 
   const balance = (v: number) => balanceVisible ? formatRM(v) : 'RM •••••';
 
@@ -93,45 +120,32 @@ export default function BudgetsPage() {
             </Button>
           </SheetTrigger>
           <SheetContent className="bg-slate-900 border-slate-800 text-white w-full sm:max-w-md">
-            <SheetHeader>
-              <SheetTitle className="text-white">Create Budget</SheetTitle>
-            </SheetHeader>
+            <SheetHeader><SheetTitle className="text-white">Create Budget</SheetTitle></SheetHeader>
             <form onSubmit={handleSubmit((d) => createMutation.mutate({
-              ...d,
-              category_id: parseInt(d.category_id),
-              amount_limit: parseFloat(d.amount_limit),
+              ...d, category_id: parseInt(d.category_id), amount_limit: parseFloat(d.amount_limit),
             }))} className="space-y-4 mt-6">
               <div className="space-y-1.5">
                 <Label className="text-slate-300">Category</Label>
                 <Controller name="category_id" control={control} rules={{ required: true }} render={({ field }) => (
                   <Select onValueChange={field.onChange} value={field.value?.toString()}>
-                    <SelectTrigger className="bg-slate-800 border-slate-700 text-white">
-                      <SelectValue placeholder="Select category" />
-                    </SelectTrigger>
+                    <SelectTrigger className="bg-slate-800 border-slate-700 text-white"><SelectValue placeholder="Select category" /></SelectTrigger>
                     <SelectContent className="bg-slate-800 border-slate-700 text-white">
                       {expenseCategories.map((c: any) => (
-                        <SelectItem key={c.id} value={c.id.toString()}>
-                          {c.parent ? `${c.parent.name} → ` : ''}{c.name}
-                        </SelectItem>
+                        <SelectItem key={c.id} value={c.id.toString()}>{c.parent ? `${c.parent.name} → ` : ''}{c.name}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 )} />
               </div>
-
               <div className="space-y-1.5">
                 <Label className="text-slate-300">Budget Limit (RM)</Label>
-                <Input {...register('amount_limit', { required: true })} type="number" step="0.01" placeholder="0.00"
-                  className="bg-slate-800 border-slate-700 text-white" />
+                <Input {...register('amount_limit', { required: true })} type="number" step="0.01" placeholder="0.00" className="bg-slate-800 border-slate-700 text-white" />
               </div>
-
               <div className="space-y-1.5">
                 <Label className="text-slate-300">Period Type</Label>
                 <Controller name="period_type" control={control} rules={{ required: true }} render={({ field }) => (
                   <Select onValueChange={field.onChange} value={field.value}>
-                    <SelectTrigger className="bg-slate-800 border-slate-700 text-white">
-                      <SelectValue placeholder="Select period" />
-                    </SelectTrigger>
+                    <SelectTrigger className="bg-slate-800 border-slate-700 text-white"><SelectValue placeholder="Select period" /></SelectTrigger>
                     <SelectContent className="bg-slate-800 border-slate-700 text-white">
                       <SelectItem value="monthly">Monthly</SelectItem>
                       <SelectItem value="weekly">Weekly</SelectItem>
@@ -139,14 +153,10 @@ export default function BudgetsPage() {
                   </Select>
                 )} />
               </div>
-
               <div className="flex items-center gap-2 pt-2">
                 <input type="checkbox" {...register('rollover')} id="rollover" className="rounded border-slate-700 text-indigo-600 bg-slate-800 focus:ring-indigo-500 focus:ring-offset-slate-900" />
-                <Label htmlFor="rollover" className="text-slate-300 text-sm cursor-pointer select-none">
-                  Rollover remaining budget to next period
-                </Label>
+                <Label htmlFor="rollover" className="text-slate-300 text-sm cursor-pointer select-none">Rollover remaining budget to next period</Label>
               </div>
-
               <Button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-500" disabled={createMutation.isPending}>
                 {createMutation.isPending ? 'Creating…' : 'Create Budget'}
               </Button>
@@ -163,7 +173,6 @@ export default function BudgetsPage() {
         ) : budgets.length === 0 ? (
           <Card className="col-span-full bg-slate-900 border-slate-800 py-16 text-center">
             <CardContent>
-              <p className="text-4xl mb-4">🎯</p>
               <p className="font-semibold text-slate-300">No active budgets set</p>
               <p className="text-sm text-slate-500 mt-1">Create limits to keep your spending in check</p>
             </CardContent>
@@ -174,23 +183,32 @@ export default function BudgetsPage() {
             const progressColor = PROGRESS_COLORS[b.status as keyof typeof PROGRESS_COLORS] ?? PROGRESS_COLORS.on_track;
 
             return (
-              <Card key={b.budget_id} className="bg-slate-900 border-slate-800 hover:border-slate-700/60 transition-all flex flex-col justify-between">
+              <Card key={b.budget_id} className={`bg-slate-900 border-slate-800 hover:border-slate-700/60 transition-all flex flex-col justify-between ${b.is_active === false ? 'opacity-50' : ''}`}>
                 <CardHeader className="flex flex-row items-start justify-between pb-2">
                   <div>
-                    <CardTitle className="text-base text-slate-100 font-bold">{b.category}</CardTitle>
+                    <div className="flex items-center gap-2">
+                      <CardTitle className="text-base text-slate-100 font-bold">{b.category}</CardTitle>
+                      {b.is_active === false && (
+                        <Badge variant="outline" className="text-[10px] text-slate-500 border-slate-700">Inactive</Badge>
+                      )}
+                    </div>
                     <span className="text-xs text-slate-500 capitalize">{b.period_type ?? 'monthly'} budget</span>
                   </div>
-                  <button
-                    onClick={() => {
-                      if (confirm('Are you sure you want to delete this budget?')) {
-                        deleteMutation.mutate(b.budget_id);
-                      }
-                    }}
-                    className="text-slate-500 hover:text-red-400 transition-colors p-1"
-                    title="Delete budget"
-                  >
-                    <Trash2 size={16} />
-                  </button>
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => openEdit(b)} className="text-slate-500 hover:text-indigo-400 transition-colors p-1" title="Edit budget">
+                      <Pencil size={16} />
+                    </button>
+                    <button
+                      onClick={() => toggleMutation.mutate(b.budget_id)}
+                      className={`p-1 transition-colors ${b.is_active === false ? 'text-slate-600 hover:text-green-400' : 'text-slate-500 hover:text-yellow-400'}`}
+                      title={b.is_active === false ? 'Activate budget' : 'Deactivate budget'}
+                    >
+                      <Power size={16} />
+                    </button>
+                    <button onClick={() => { setSelectedBudget(b); setDeleteOpen(true); }} className="text-slate-500 hover:text-red-400 transition-colors p-1" title="Delete budget">
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="flex justify-between items-baseline">
@@ -202,21 +220,16 @@ export default function BudgetsPage() {
                       <span className="text-sm font-semibold text-slate-300">Limit: {balance(b.limit)}</span>
                     </div>
                   </div>
-
                   <div className="space-y-1">
                     <Progress value={Math.min(b.percentage, 100)} className="h-2 bg-slate-800"
-                      style={{ '--progress-color': progressColor } as any}
-                    />
+                      style={{ '--progress-color': progressColor } as any} />
                     <div className="flex justify-between text-[11px] text-slate-500">
                       <span>{b.percentage.toFixed(0)}% used</span>
                       <span>{b.limit - b.spent >= 0 ? `${balance(b.limit - b.spent)} left` : `${balance(Math.abs(b.limit - b.spent))} over limit`}</span>
                     </div>
                   </div>
-
                   <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold select-none ${statusColor}`}>
-                    {b.status === 'exceeded' ? <ShieldAlert size={14} /> :
-                     b.status === 'approaching' ? <ShieldAlert size={14} /> :
-                     <CheckCircle2 size={14} />}
+                    {b.status === 'exceeded' || b.status === 'approaching' ? <ShieldAlert size={14} /> : <CheckCircle2 size={14} />}
                     <span className="capitalize">{b.status.replace('_', ' ')}</span>
                   </div>
                 </CardContent>
@@ -225,6 +238,47 @@ export default function BudgetsPage() {
           })
         )}
       </div>
+
+      {/* Edit Budget Sheet */}
+      <Sheet open={editOpen} onOpenChange={setEditOpen}>
+        <SheetContent className="bg-slate-900 border-slate-800 text-white w-full sm:max-w-md">
+          <SheetHeader><SheetTitle className="text-white">Edit Budget</SheetTitle></SheetHeader>
+          <form onSubmit={editSubmit((d) => updateMutation.mutate({ ...d, amount_limit: parseFloat(d.amount_limit) }))} className="space-y-4 mt-6">
+            <div className="space-y-1.5">
+              <Label className="text-slate-300">Budget Limit (RM)</Label>
+              <Input {...editReg('amount_limit', { required: true })} type="number" step="0.01" className="bg-slate-800 border-slate-700 text-white" />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-slate-300">Period</Label>
+              <Controller name="period_type" control={editCtrl} render={({ field }) => (
+                <Select onValueChange={field.onChange} value={field.value}>
+                  <SelectTrigger className="bg-slate-800 border-slate-700 text-white"><SelectValue /></SelectTrigger>
+                  <SelectContent className="bg-slate-800 border-slate-700 text-white">
+                    <SelectItem value="monthly">Monthly</SelectItem>
+                    <SelectItem value="weekly">Weekly</SelectItem>
+                  </SelectContent>
+                </Select>
+              )} />
+            </div>
+            <div className="flex items-center gap-2">
+              <input type="checkbox" {...editReg('rollover')} id="edit-rollover" className="rounded border-slate-700 text-indigo-600 bg-slate-800" />
+              <Label htmlFor="edit-rollover" className="text-slate-300 text-sm cursor-pointer">Rollover unused budget</Label>
+            </div>
+            <Button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-500" disabled={updateMutation.isPending}>
+              {updateMutation.isPending ? 'Saving…' : 'Save Changes'}
+            </Button>
+          </form>
+        </SheetContent>
+      </Sheet>
+
+      <ConfirmDialog
+        open={deleteOpen}
+        title="Delete budget?"
+        description="This will permanently remove this budget and its tracking data."
+        onConfirm={() => deleteMutation.mutate(selectedBudget?.budget_id)}
+        onCancel={() => setDeleteOpen(false)}
+        loading={deleteMutation.isPending}
+      />
     </div>
   );
 }
