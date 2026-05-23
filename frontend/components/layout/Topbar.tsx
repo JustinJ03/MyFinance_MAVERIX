@@ -50,9 +50,12 @@ export default function Topbar() {
         >
           <Bell size={18} />
           {pendingCount > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
-              {pendingCount > 9 ? '9+' : pendingCount}
-            </span>
+            <>
+              <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center z-10">
+                {pendingCount > 9 ? '9+' : pendingCount}
+              </span>
+              <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-amber-400 opacity-50 animate-ping" />
+            </>
           )}
         </Link>
 
