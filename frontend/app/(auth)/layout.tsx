@@ -1,5 +1,10 @@
+export const dynamic = 'force-dynamic';
+
+import Providers from '@/components/Providers';
+
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
   return (
+    <Providers>
     <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 relative overflow-hidden">
       {/* Background radial glow */}
       <div className="pointer-events-none absolute inset-0" style={{
@@ -33,5 +38,6 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
         </p>
       </div>
     </div>
+    </Providers>
   );
 }

@@ -1,11 +1,14 @@
 'use client';
 
+export const dynamic = 'force-dynamic';
+
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store/authStore';
 import Sidebar from '@/components/layout/Sidebar';
 import Topbar from '@/components/layout/Topbar';
 import { useUiStore } from '@/store/uiStore';
+import Providers from '@/components/Providers';
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router  = useRouter();
@@ -23,8 +26,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     }
   }, [mounted, isAuthenticated, router]);
 
-  // Prevent hydration errors by ensuring client and server render match initially
-  // We return a matching div structure instead of null so the DOM tree aligns with the Toaster sibling
   if (!mounted || !isAuthenticated()) {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center">
@@ -34,14 +35,16 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex">
-      <Sidebar />
-      <div className={`flex-1 flex flex-col transition-all duration-300 ${sidebarCollapsed ? 'ml-16' : 'ml-64'}`}>
-        <Topbar />
-        <main className="flex-1 p-6 overflow-auto">
-          {children}
-        </main>
+    <Providers>
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex">
+        <Sidebar />
+        <div className={`flex-1 flex flex-col transition-all duration-300 ${sidebarCollapsed ? 'ml-16' : 'ml-64'}`}>
+          <Topbar />
+          <main className="flex-1 p-6 overflow-auto">
+            {children}
+          </main>
+        </div>
       </div>
-    </div>
+    </Providers>
   );
 }
